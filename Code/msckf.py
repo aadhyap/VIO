@@ -266,16 +266,34 @@ class MSCKF(object):
     # Filter related functions
     # (batch_imu_processing, process_model, predict_new_state)
 
+    #ref https://github.com/uoip/stereo_msckf/blob/master/utils.py
     def FromTwoVectors(vector1, vector2):
 
          """
         Rotation quaternion from v0 to v1.
         """
-        v0 = v0 / np.linalg.norm(v0)
-        v1 = v1 / np.linalg.norm(v1)
         
+        vector1 = vector1 / np.linalg.norm(vector1)
+        vector2 = vector2 / np.linalg.norm(v1)
+        d = vector1 @ vector2
 
-        #TODO
+        # if dot == -1, vectors are nearly opposite
+        if d < -0.999999:
+            axis = np.cross([1,0,0], vector1)
+            if np.linalg.norm(axis) < 0.000001:
+                axis = np.cross([0,1,0], vector1)
+            q = np.array([*axis, 0.])
+        elif d > 0.999999:
+            q = np.array([0., 0., 0., 1.])
+        else:
+            s = np.sqrt((1+d)*2)
+            axis = np.cross(vector1, vector2)
+            vec = axis / s
+            w = 0.5 * s
+            q = np.array([*vec, w])
+            
+        q = q / np.linalg.norm(q)
+        return quaternion_conjugate(q) 
 
 
 
