@@ -249,15 +249,19 @@ class MSCKF(object):
             sum_angular_vel += angular
             sum_linear_acc += linear
 
+        self.state_server.imu_state.gyro_bias = sum_angular_vel / len(imu_msg_buffer)
+
         # Find the gravity in the IMU frame.
-        ...
-        
+        gravity_imu = sum_linear_acc / len(imu_msg_buffer)
+
         # Normalize the gravity and save to IMUState          
-        ...
+        gravity_norm = np.linalg.norm(gravity_imu)
+        IMUState.gravity = np.array([0.0, 0.0, -gravity_norm])
 
         # Initialize the initial orientation, so that the estimation
         # is consistent with the inertial frame.
-        ...
+        q0_i_w = FromTwoVectors(gravity_imu, -IMUState.gravity)
+        self.state_server.imu_state.orientation = rotationToQuaternion(q0_i_w.toRotationMatrix().transpose())
 
     # Filter related functions
     # (batch_imu_processing, process_model, predict_new_state)
