@@ -266,6 +266,110 @@ class MSCKF(object):
     # Filter related functions
     # (batch_imu_processing, process_model, predict_new_state)
 
+    #ref https://github.com/uoip/stereo_msckf/blob/master/utils.py
+    def FromTwoVectors(vector1, vector2):
+
+         """
+        Rotation quaternion from v0 to v1.
+        """
+        
+        vector1 = vector1 / np.linalg.norm(vector1)
+        vector2 = vector2 / np.linalg.norm(v1)
+        d = vector1 @ vector2
+
+        # if dot == -1, vectors are nearly opposite
+        if d < -0.999999:
+            axis = np.cross([1,0,0], vector1)
+            if np.linalg.norm(axis) < 0.000001:
+                axis = np.cross([0,1,0], vector1)
+            q = np.array([*axis, 0.])
+        elif d > 0.999999:
+            q = np.array([0., 0., 0., 1.])
+        else:
+            s = np.sqrt((1+d)*2)
+            axis = np.cross(vector1, vector2)
+            vec = axis / s
+            w = 0.5 * s
+            q = np.array([*vec, w])
+            
+        q = q / np.linalg.norm(q)
+        return quaternion_conjugate(q) 
+
+
+
+    #reference: https://automaticaddison.com/how-to-convert-a-quaternion-to-a-rotation-matrix/
+    def toRotationMatrix(Q):
+        """
+        Covert a quaternion into a full three-dimensional rotation matrix.
+     
+        Input
+        :param Q: A 4 element array representing the quaternion (q0,q1,q2,q3) 
+     
+        Output
+        :return: A 3x3 element matrix representing the full 3D rotation matrix. 
+                 This rotation matrix converts a point in the local reference 
+                 frame to a point in the global reference frame.
+        """
+        # Extract the values from Q
+        q0 = Q[0]
+        q1 = Q[1]
+        q2 = Q[2]
+        q3 = Q[3]
+         
+        # First row of the rotation matrix
+        r00 = 2 * (q0 * q0 + q1 * q1) - 1
+        r01 = 2 * (q1 * q2 - q0 * q3)
+        r02 = 2 * (q1 * q3 + q0 * q2)
+         
+        # Second row of the rotation matrix
+        r10 = 2 * (q1 * q2 + q0 * q3)
+        r11 = 2 * (q0 * q0 + q2 * q2) - 1
+        r12 = 2 * (q2 * q3 - q0 * q1)
+         
+        # Third row of the rotation matrix
+        r20 = 2 * (q1 * q3 - q0 * q2)
+        r21 = 2 * (q2 * q3 + q0 * q1)
+        r22 = 2 * (q0 * q0 + q3 * q3) - 1
+         
+        # 3x3 rotation matrix
+        rot_matrix = np.array([[r00, r01, r02],
+                               [r10, r11, r12],
+                               [r20, r21, r22]])
+                                
+        return rot_matrix
+
+
+    def rotationToQuaternion(vector):
+        #reference: https://answers.ros.org/question/388140/converting-a-rotation-matrix-to-quaternions-in-python/
+
+        t = np.matrix.trace(m)
+        q = np.asarray([0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+        if(t > 0):
+            t = np.sqrt(t + 1)
+            q[3] = 0.5 * t
+            t = 0.5/t
+            q[0] = (m[2,1] - m[1,2]) * t
+            q[1] = (m[0,2] - m[2,0]) * t
+            q[2] = (m[1,0] - m[0,1]) * t
+
+        else:
+            i = 0
+            if (m[1,1] > m[0,0]):
+                i = 1
+            if (m[2,2] > m[i,i]):
+                i = 2
+            j = (i+1)%3
+            k = (j+1)%3
+
+            t = np.sqrt(m[i,i] - m[j,j] - m[k,k] + 1)
+            q[i] = 0.5 * t
+            t = 0.5 / t
+            q[3] = (m[k,j] - m[j,k]) * t
+            q[j] = (m[j,i] + m[i,j]) * t
+            q[k] = (m[k,i] + m[i,k]) * t
+
+
 
 
     def batch_imu_processing(self, time_bound):
@@ -280,32 +384,17 @@ class MSCKF(object):
         # Update the state info
         # Repeat until the time_bound is reached
 
-        used_imu_msg_cntr = 0
-
-        for imu_msg in self.imu_msg_buffer:
-            imu_time = imu_msg.timestamp
-            if(imu_time < self.state_server.imu_state.time):
-                used_imu_msg_cntr += 1
-                continue
-            if (imu_time > time_bound):
-                break
-
-        process_model(imu_time, msg.angular_velocity, msg.linear_acceleration)
-        used_imu_msg_cntr += 1
 
 
         
         # Set the current imu id to be the IMUState.next_id
-        self.state_server.imu_state.id = IMUState.next_id
-
+        ...
         
         # IMUState.next_id increments
-        IMUState.next_id += 1
-
+        ...
 
         # Remove all used IMU msgs.
-        self.imu_msg_buffer = self.imu_msg_buffer[used_imu_msg_count:]
-        return
+        ...
 
     def process_model(self, time, m_gyro, m_acc):
         """
@@ -347,34 +436,68 @@ class MSCKF(object):
         """Propogate the state using 4th order Runge-Kutta for equstion (1) in "MSCKF" paper"""
         # compute norm of gyro
         ...
+        gyroNorm = np.linalg.norm(gyro)
         
         # Get the Omega matrix, the equation above equation (2) in "MSCKF" paper
         ...
+        Omega = np.zeros((4, 4)) # defime the omega matrix
+        Omega[:3, :3] = -skew(gyro) # use utils to generate the skew matrix
+        Omega[:3, 3] = gyro
+        Omega[3, :3] = -gyro
         
         # Get the orientation, velocity, position
         ...
+
+        q = self.state_server.imu_state.orientation
+        v = self.state_server.imu_state.velocity
+        p = self.state_server.imu_state.position
         
         # Compute the dq_dt, dq_dt2 in equation (1) in "MSCKF" paper
         ...
-        
+        dq_dt = np.cos(gyroNorm*dt*0.5) * (np.identity(4) +
+                Omega*dt*0.5) @ q
+
+        dq_dt2 = np.cos(gyroNorm*dt*0.25) * (np.identity(4) +
+                Omega*dt*0.25) @ q
+
+        dR_dt_transpose = to_rotation(dq_dt).T
+        dR_dt2_transpose = to_rotation(dq_dt2).T
+
         # Apply 4th order Runge-Kutta 
         # k1 = f(tn, yn)
         ...
+        k1_p_dot = v
+        k1_v_dot = to_rotation(q).T @ acc + IMUState.gravity
+
 
         # k2 = f(tn+dt/2, yn+k1*dt/2)
         ...
+        k1_v = v + k1_v_dot*dt/2.
+        k2_p_dot = k1_v
+        k2_v_dot = dR_dt2_transpose @ acc + IMUState.gravity
         
         # k3 = f(tn+dt/2, yn+k2*dt/2)
         ...
-        
+        k2_v = v + k2_v_dot*dt/2
+        k3_p_dot = k2_v
+        k3_v_dot = dR_dt2_transpose @ acc + IMUState.gravity
         # k4 = f(tn+dt, yn+k3*dt)
         ...
+        k3_v = v + k3_v_dot*dt
+        k4_p_dot = k3_v
+        k4_v_dot = dR_dt_transpose @ acc + IMUState.gravity
 
         # yn+1 = yn + dt/6*(k1+2*k2+2*k3+k4)
         ...
+        q = dq_dt / np.linalg.norm(dq_dt)
+        v = v + (k1_v_dot + 2*k2_v_dot + 2*k3_v_dot + k4_v_dot)*dt/6.
+        p = p + (k1_p_dot + 2*k2_p_dot + 2*k3_p_dot + k4_p_dot)*dt/6.
 
         # update the imu state
         ...
+        self.state_server.imu_state.orientation = q
+        self.state_server.imu_state.velocity = v
+        self.state_server.imu_state.position = p
 
     
     def state_augmentation(self, time):
