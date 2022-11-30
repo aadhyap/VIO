@@ -284,15 +284,33 @@ class MSCKF(object):
 
 
 
-        
+        used_imu_msg_cntr = 0
+
+        for imu_msg in self.imu_msg_buffer:
+            imu_time = imu_msg.timestamp
+            if(imu_time < self.state_server.imu_state.time):
+                used_imu_msg_cntr += 1
+                continue
+            if (imu_time > time_bound):
+                break
+
+        process_model(imu_time, msg.angular_velocity, msg.linear_acceleration)
+        used_imu_msg_cntr += 1
+
+
+
         # Set the current imu id to be the IMUState.next_id
-        ...
-        
+        self.state_server.imu_state.id = IMUState.next_id
+
+
         # IMUState.next_id increments
-        ...
+    
+        IMUState.next_id += 1
+
 
         # Remove all used IMU msgs.
-        ...
+        self.imu_msg_buffer = self.imu_msg_buffer[used_imu_msg_count:]
+        return
 
     def process_model(self, time, m_gyro, m_acc):
         """
