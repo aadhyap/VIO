@@ -320,29 +320,74 @@ class MSCKF(object):
         Section III.A: The dynamics of the error IMU state following equation (2) in the "MSCKF" paper.
         """
         # Get the error IMU state
-        ...
+        #Remove the bias from the measured gyro and acceleration
+        imu_state = self.state_server.imu_state 
+        gyro = m_gyro - self.imu_state.gyro_bias
+        acc = m_acc - self.imu_state.acc_bias
+        dt = time - self.imu_state.time
 
-        # Compute discrete transition F, Q matrices in Appendix A in "MSCKF" paper
-        ...
-        
+        # Compute discrete transition F, G matrices in Appendix A in "MSCKF" paper
+        # Compute discrete transition and noise covariance matrix
+        F = np.zeros((21, 21))
+        G = np.zeros((21, 12))
+
         # Approximate matrix exponential to the 3rd order, which can be 
+        C_q = to_rotation(self.imu_state.orientation)
+        F[:3, :3] = -skew(gyro)
+        F[:3, 3:6] = -np.identity(3)
+        F[6:9, :3] = np.dot(-C_q.T,skew(acc))
+        F[6:9, 9:12] = -C_q.T
+        F[12:15, 6:9] = np.identity(3)
+
+        G[:3, :3] = -np.identity(3)
+        G[3:6, 3:6] = np.identity(3)
+        G[6:9, 6:9] = -C_q.T
+        G[9:12, 9:12] = np.identity(3)
+
         # considered to be accurate enough assuming dt is within 0.01s.
-        ...
+        Fdt = np.dot(F, dtime)
+        Fdt_square = np.dot(Fdt, Fdt)
+        Fdt_cube = np.dot(Fdt_square, Fdt)
+        Phi = np.identity(21) + Fdt + 0.5*Fdt_square + (1.0/6.0)*Fdt_cube
 
         # Propogate the state using 4th order Runge-Kutta
         self.predict_new_state(dt, gyro, acc)
 
         # Modify the transition matrix
-        ...
+        R_kk_1 = quaternionToRotation(imu_state.orientation_null)
+        Phi[3,3] = np.dot(quaternionToRotation(imu_state.orientation), R_kk_1.T)
+
+        u = np.dot(R_kk_1, IMUState.gravity)
+        s = u / (np.dot(u,u))
+
+        A1 = Phi[6:9, :3]
+        w1 = np.dot((skew(imu_state.velocity_null - imu_state.velocity)), IMUState.gravity)
+        Phi[6:9, :3] = A1 - (A1 @ u - w1)[:, None] * s
+
+        A2 = Phi[12:15, :3]
+        w2 = skew(dt*imu_state.velocity_null+imu_state.position_null - 
+            imu_state.position) @ IMUState.gravity
+        Phi[12:15, :3] = A2 - (A2 @ u - w2)[:, None] * 
 
         # Propogate the state covariance matrix.
-        ...
+        Q = Phi @ G @ self.state_server.continuous_noise_cov @ G.T @ Phi.T * dt
+        self.state_server.state_cov[:21, :21] = (
+        Phi @ self.state_server.state_cov[:21, :21] @ Phi.T + Q)
+
+        if len(self.state_server.cam_states) > 0:
+            self.state_server.state_cov[:21, 21:] = (
+                Phi @ self.state_server.state_cov[:21, 21:])
+            self.state_server.state_cov[21:, :21] = (
+                self.state_server.state_cov[21:, :21] @ Phi.T)
 
         # Fix the covariance to be symmetric
-        ...
+        self.state_server.state_cov = (
+            self.state_server.state_cov + self.state_server.state_cov.T) / 2.
         
         # Update the state correspondes to null space.
-        ...
+        self.state_server.imu_state.orientation_null = imu_state.orientation
+        self.state_server.imu_state.position_null = imu_state.position
+        self.state_server.imu_state.velocity_null = imu_state.velocity
         
 
     def predict_new_state(self, dt, gyro, acc):
@@ -351,19 +396,17 @@ class MSCKF(object):
         """
         """Propogate the state using 4th order Runge-Kutta for equstion (1) in "MSCKF" paper"""
         # compute norm of gyro
-        ...
+    
         gyroNorm = np.linalg.norm(gyro)
         
         # Get the Omega matrix, the equation above equation (2) in "MSCKF" paper
-        ...
+
         Omega = np.zeros((4, 4)) # defime the omega matrix
         Omega[:3, :3] = -skew(gyro) # use utils to generate the skew matrix
         Omega[:3, 3] = gyro
         Omega[3, :3] = -gyro
         
         # Get the orientation, velocity, position
-        ...
-
         q = self.state_server.imu_state.orientation
         v = self.state_server.imu_state.velocity
         p = self.state_server.imu_state.position
